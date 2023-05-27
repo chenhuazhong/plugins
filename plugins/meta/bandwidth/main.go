@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 
@@ -44,6 +45,7 @@ type BandwidthEntry struct {
 
 	EgressRate  uint64 `json:"egressRate"`  // Bandwidth rate in bps for traffic through container. 0 for no limit. If egressRate is set, egressBurst must also be set
 	EgressBurst uint64 `json:"egressBurst"` // Bandwidth burst in bits for traffic through container. 0 for no limit. If egressBurst is set, egressRate must also be set
+	NameSpace   string `json:"nameSpace"`
 }
 
 func (bw *BandwidthEntry) isZero() bool {
@@ -165,6 +167,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	//args.Args =  IgnoreUnknown=1;K8S_POD_NAMESPACE=default;K8S_POD_NAME=test;K8S_POD_INFRA_CONTAINER_ID=43bc300107c3b084c6cbdc7d03317a662a98f75805b839778463411466cd8389
+	k8sNameSpace := fmt.Sprintf("K8S_POD_NAMESPACE=%s", conf.NameSpace)
+
 	bandwidth := getBandwidth(conf)
 	if bandwidth == nil || bandwidth.isZero() {
 		return types.PrintResult(conf.PrevResult, conf.CNIVersion)
@@ -190,14 +195,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	if bandwidth.IngressRate > 0 && bandwidth.IngressBurst > 0 {
+	if conf.NameSpace != "" && strings.Contains(args.Args, k8sNameSpace) && bandwidth.IngressRate > 0 && bandwidth.IngressBurst > 0 {
 		err = CreateIngressQdisc(bandwidth.IngressRate, bandwidth.IngressBurst, hostInterface.Name)
 		if err != nil {
 			return err
 		}
 	}
 
-	if bandwidth.EgressRate > 0 && bandwidth.EgressBurst > 0 {
+	if conf.NameSpace != "" && strings.Contains(args.Args, k8sNameSpace) && bandwidth.EgressRate > 0 && bandwidth.EgressBurst > 0 {
 		mtu, err := getMTU(hostInterface.Name)
 		if err != nil {
 			return err
@@ -234,8 +239,13 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ifbDeviceName := getIfbDeviceName(conf.Name, args.ContainerID)
+	//args.Args =  IgnoreUnknown=1;K8S_POD_NAMESPACE=default;K8S_POD_NAME=test;K8S_POD_INFRA_CONTAINER_ID=43bc300107c3b084c6cbdc7d03317a662a98f75805b839778463411466cd8389
+	k8sNameSpace := fmt.Sprintf("K8S_POD_NAMESPACE=%s", conf.NameSpace)
 
+	ifbDeviceName := getIfbDeviceName(conf.Name, args.ContainerID)
+	if conf.NameSpace == "" || !strings.Contains(args.Args, k8sNameSpace) {
+		return nil
+	}
 	return TeardownIfb(ifbDeviceName)
 }
 
